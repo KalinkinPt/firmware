@@ -1,0 +1,26 @@
+name: Build ML-24 UA (heltec-v4-ua)
+
+on:
+  push:
+    branches:
+      - ua-layout
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      short: ${{ steps.v.outputs.short }}
+    steps:
+      - id: v
+        run: echo "short=ua-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build_firmware.yml
+    with:
+      version: ${{ needs.version.outputs.short }}
+      platform: esp32s3
+      pio_env: heltec-v4-ua

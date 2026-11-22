@@ -559,7 +559,8 @@ class Screen : public concurrency::OSThread
         }
 
         // We want to strip out prefix chars for two-byte char formats
-        if (ch == 0xC2 || ch == 0xC3 || ch == 0x82 || ch == 0xD0 || ch == 0xD1)
+        // 0xD2 is the lead byte of Ґ/ґ (U+0490/U+0491): strip it too, or it shows as a stray glyph
+        if (ch == 0xC2 || ch == 0xC3 || ch == 0x82 || ch == 0xD0 || ch == 0xD1 || ch == 0xD2)
             return (uint8_t)0;
 
 #endif

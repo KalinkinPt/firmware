@@ -172,6 +172,9 @@ class CannedMessageModule : public SinglePortModule, public Observable<const UIF
     char highlight = 0x00;
     char payload = 0x00;
     unsigned int cursor = 0;
+#ifdef MESHTASTIC_UA_LAYOUT
+    bool uaLayout = false; // true = Ukrainian JCUKEN layout for hardware keyboards
+#endif
     unsigned long lastTouchMillis = 0;
     uint32_t lastFilterUpdate = 0;
     static constexpr uint32_t filterDebounceMs = 30;

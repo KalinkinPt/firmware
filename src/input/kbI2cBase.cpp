@@ -534,9 +534,15 @@ int32_t KbI2cBase::runOnce()
                 e.inputEvent = INPUT_BROKER_GPS_TOGGLE;
                 e.kbchar = c;
                 break;
-            case 0xaf: // fn+space  INPUT_BROKER_SEND_PING
+            case 0xaf: // fn+space
+#ifdef MESHTASTIC_UA_LAYOUT
+                // fn+space switches EN <-> UA layout (ping stays on sym+space)
+                e.inputEvent = INPUT_BROKER_ANYKEY;
+                e.kbchar = INPUT_BROKER_MSG_LAYOUT_TOGGLE;
+#else
                 e.inputEvent = INPUT_BROKER_SEND_PING;
                 e.kbchar = c;
+#endif
                 break;
             case 0x9b: // fn+s      INPUT_BROKER_MSG_SHUTDOWN
                 e.inputEvent = INPUT_BROKER_SHUTDOWN;

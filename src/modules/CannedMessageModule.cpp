@@ -58,6 +58,112 @@ extern ScanI2C::DeviceAddress cardkb_found;
 extern bool osk_found;
 
 static const char *cannedMessagesConfigFile = "/prefs/cannedConf.proto";
+
+// ---------- UTF-8 helpers (cursor/backspace must step over whole characters) ----------
+static inline bool isUtf8Continuation(char ch)
+{
+    return (static_cast<uint8_t>(ch) & 0xC0) == 0x80;
+}
+static unsigned int utf8PrevBoundary(const String &s, unsigned int pos)
+{
+    if (pos == 0)
+        return 0;
+    pos--;
+    while (pos > 0 && isUtf8Continuation(s[pos]))
+        pos--;
+    return pos;
+}
+static unsigned int utf8NextBoundary(const String &s, unsigned int pos)
+{
+    const unsigned int len = s.length();
+    if (pos >= len)
+        return len;
+    pos++;
+    while (pos < len && isUtf8Continuation(s[pos]))
+        pos++;
+    return pos;
+}
+
+#ifdef MESHTASTIC_UA_LAYOUT
+// Ukrainian JCUKEN layout on a QWERTY hardware keyboard (M5Stack CardKB).
+// Letters follow the standard Ukrainian layout; letters that live on [ ] ; ' on a PC keyboard
+// sit on the digit row of the CardKB (as engraved on the ML-24 keycaps):
+//   5=' (apostrophe)  6=ґ  7=х  8=ї  9=ж  0=є     ,=б  .=ю     sym+, (<) = ,   sym+. (>) = .
+// Returns a UTF-8 string, or nullptr if the key is not remapped.
+static const char *uaLayoutMap(char c)
+{
+    switch (c) {
+    // lower case
+    case 'q': return "й";
+    case 'w': return "ц";
+    case 'e': return "у";
+    case 'r': return "к";
+    case 't': return "е";
+    case 'y': return "н";
+    case 'u': return "г";
+    case 'i': return "ш";
+    case 'o': return "щ";
+    case 'p': return "з";
+    case 'a': return "ф";
+    case 's': return "і";
+    case 'd': return "в";
+    case 'f': return "а";
+    case 'g': return "п";
+    case 'h': return "р";
+    case 'j': return "о";
+    case 'k': return "л";
+    case 'l': return "д";
+    case 'z': return "я";
+    case 'x': return "ч";
+    case 'c': return "с";
+    case 'v': return "м";
+    case 'b': return "и";
+    case 'n': return "т";
+    case 'm': return "ь";
+    case ',': return "б";
+    case '.': return "ю";
+    // upper case (CardKB sends upper case ASCII when shift / caps is active)
+    case 'Q': return "Й";
+    case 'W': return "Ц";
+    case 'E': return "У";
+    case 'R': return "К";
+    case 'T': return "Е";
+    case 'Y': return "Н";
+    case 'U': return "Г";
+    case 'I': return "Ш";
+    case 'O': return "Щ";
+    case 'P': return "З";
+    case 'A': return "Ф";
+    case 'S': return "І";
+    case 'D': return "В";
+    case 'F': return "А";
+    case 'G': return "П";
+    case 'H': return "Р";
+    case 'J': return "О";
+    case 'K': return "Л";
+    case 'L': return "Д";
+    case 'Z': return "Я";
+    case 'X': return "Ч";
+    case 'C': return "С";
+    case 'V': return "М";
+    case 'B': return "И";
+    case 'N': return "Т";
+    case 'M': return "Ь";
+    // digit row: letters that do not fit on the letter keys
+    case '5': return "'"; // apostrophe (U+02BC is not in the OLED font, plain ' is what people type anyway)
+    case '6': return "ґ";
+    case '7': return "х";
+    case '8': return "ї";
+    case '9': return "ж";
+    case '0': return "є";
+    // punctuation replaced by б/ю is reachable through the sym layer
+    case '<': return ",";
+    case '>': return ".";
+    default:
+        return nullptr;
+    }
+}
+#endif
 static NodeNum lastDest = NODENUM_BROADCAST;
 static uint8_t lastChannel = 0;
 static bool lastDestSet = false;
@@ -474,6 +580,21 @@ int CannedMessageModule::handleInputEvent(const InputEvent *event)
     // Tab key: Always allow switching between canned/destination screens
     if (event->kbchar == INPUT_BROKER_MSG_TAB && handleTabSwitch(event))
         return 1;
+
+#ifdef MESHTASTIC_UA_LAYOUT
+    // Layout switch (fn+space on CardKB): works in any state, shows a short banner
+    if (event->kbchar == INPUT_BROKER_MSG_LAYOUT_TOGGLE) {
+        uaLayout = !uaLayout;
+        LOG_INFO("Keyboard layout: %s", uaLayout ? "UA" : "EN");
+        if (screen) {
+            if (runState == CANNED_MESSAGE_RUN_STATE_FREETEXT)
+                screen->forceDisplay(); // the EN/UA tag in the header redraws
+            else
+                screen->showSimpleBanner(uaLayout ? "UA" : "EN", 800);
+        }
+        return 1;
+    }
+#endif
 
     // Matrix keypad: If matrix key, trigger action select for canned message
     if (event->inputEvent == INPUT_BROKER_MATRIXKEY) {
@@ -1373,12 +1494,12 @@ int32_t CannedMessageModule::runOnce()
         switch (this->payload) {
         case INPUT_BROKER_LEFT:
             if (this->runState == CANNED_MESSAGE_RUN_STATE_FREETEXT && this->cursor > 0) {
-                this->cursor--;
+                this->cursor = utf8PrevBoundary(this->freetext, this->cursor);
             }
             break;
         case INPUT_BROKER_RIGHT:
             if (this->runState == CANNED_MESSAGE_RUN_STATE_FREETEXT && this->cursor < this->freetext.length()) {
-                this->cursor++;
+                this->cursor = utf8NextBoundary(this->freetext, this->cursor);
             }
             break;
         default:
@@ -1388,17 +1509,12 @@ int32_t CannedMessageModule::runOnce()
             e.action = UIFrameEvent::Action::REGENERATE_FRAMESET;
             switch (this->payload) {
             case 0x08: // backspace
-                if (this->freetext.length() > 0) {
-                    if (this->cursor > 0) {
-                        if (this->cursor == this->freetext.length()) {
-                            this->freetext = this->freetext.substring(0, this->freetext.length() - 1);
-                        } else {
-                            this->freetext = this->freetext.substring(0, this->cursor - 1) +
-                                             this->freetext.substring(this->cursor, this->freetext.length());
-                        }
-                        this->cursor--;
-                    }
-                } else {
+                if (this->freetext.length() > 0 && this->cursor > 0) {
+                    // remove the whole UTF-8 character before the cursor (Cyrillic is 2 bytes)
+                    const unsigned int start = utf8PrevBoundary(this->freetext, this->cursor);
+                    this->freetext =
+                        this->freetext.substring(0, start) + this->freetext.substring(this->cursor, this->freetext.length());
+                    this->cursor = start;
                 }
                 break;
             case INPUT_BROKER_MSG_TAB: // Tab key: handled by input handler
@@ -1410,17 +1526,23 @@ int32_t CannedMessageModule::runOnce()
                 // Only insert ASCII printable characters (32-126)
                 if (this->payload >= 32 && this->payload <= 126) {
                     requestFocus();
-                    if (this->cursor == this->freetext.length()) {
-                        this->freetext += (char)this->payload;
-                    } else {
-                        this->freetext = this->freetext.substring(0, this->cursor) + (char)this->payload +
-                                         this->freetext.substring(this->cursor);
+                    String insert = String((char)this->payload);
+#ifdef MESHTASTIC_UA_LAYOUT
+                    if (this->uaLayout) {
+                        const char *mapped = uaLayoutMap((char)this->payload);
+                        if (mapped)
+                            insert = mapped;
                     }
-                    this->cursor++;
-                    const unsigned int maxChars = maxFreetextBytes();
-                    if (this->freetext.length() > maxChars) {
-                        this->cursor = maxChars;
-                        this->freetext = this->freetext.substring(0, maxChars);
+#endif
+                    // Whole character or nothing: never cut a multi-byte character at the limit
+                    if (this->freetext.length() + insert.length() <= maxFreetextBytes()) {
+                        if (this->cursor == this->freetext.length()) {
+                            this->freetext += insert;
+                        } else {
+                            this->freetext =
+                                this->freetext.substring(0, this->cursor) + insert + this->freetext.substring(this->cursor);
+                        }
+                        this->cursor += insert.length();
                     }
                 }
                 break;
@@ -1982,7 +2104,11 @@ void CannedMessageModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiState *st
             // The limit the editor keeps to, not the whole payload: the counter showed 33 left when no more could be typed
             const unsigned int used = this->freetext.length();
             int charsLeft = used < maxFreetextBytes() ? (int)(maxFreetextBytes() - used) : 0;
+#ifdef MESHTASTIC_UA_LAYOUT
+            snprintf(buffer, sizeof(buffer), "%s %d left", uaLayout ? "UA" : "EN", charsLeft);
+#else
             snprintf(buffer, sizeof(buffer), "%d left", charsLeft);
+#endif
             display->drawString(x + display->getWidth() - display->getStringWidth(buffer) - BASEUI_HEADER_LR_MARGIN,
                                 y + BASEUI_HEADER_MARGIN, buffer);
         }
