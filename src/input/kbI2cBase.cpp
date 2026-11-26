@@ -558,6 +558,16 @@ int32_t KbI2cBase::runOnce()
                 e.inputEvent = INPUT_BROKER_ANYKEY;
                 e.kbchar = c;
                 break;
+#ifdef MESHTASTIC_UA_LAYOUT
+            case 0x86: // fn+6..fn+0: upper-case ґ х ї ж є in the UA layout
+            case 0x87:
+            case 0x88:
+            case 0x89:
+            case 0x8A:
+                e.inputEvent = INPUT_BROKER_ANYKEY;
+                e.kbchar = c;
+                break;
+#endif
             case 0x0d: // Enter
                 e.inputEvent = INPUT_BROKER_SELECT;
                 break;

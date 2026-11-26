@@ -85,6 +85,20 @@ static unsigned int utf8NextBoundary(const String &s, unsigned int pos)
 }
 
 #ifdef MESHTASTIC_UA_LAYOUT
+// CardKB fn+6..fn+0 (0x86-0x8A): upper-case letters that live on the digit row
+static const char *uaUpperDigit(uint8_t c)
+{
+    switch (c) {
+    case 0x86: return "Ґ";
+    case 0x87: return "Х";
+    case 0x88: return "Ї";
+    case 0x89: return "Ж";
+    case 0x8A: return "Є";
+    default:
+        return nullptr;
+    }
+}
+
 // Ukrainian JCUKEN layout on a QWERTY hardware keyboard (M5Stack CardKB).
 // Letters follow the standard Ukrainian layout; letters that live on [ ] ; ' on a PC keyboard
 // sit on the digit row of the CardKB (as engraved on the ML-24 keycaps):
@@ -1523,13 +1537,19 @@ int32_t CannedMessageModule::runOnce()
             case INPUT_BROKER_RIGHT:
                 break;
             default:
-                // Only insert ASCII printable characters (32-126)
-                if (this->payload >= 32 && this->payload <= 126) {
+                // Only insert ASCII printable characters (32-126); in the UA layout also fn+6..fn+0 (0x86-0x8A)
+                if ((this->payload >= 32 && this->payload <= 126)
+#ifdef MESHTASTIC_UA_LAYOUT
+                    || (this->uaLayout && uaUpperDigit((uint8_t)this->payload))
+#endif
+                ) {
                     requestFocus();
                     String insert = String((char)this->payload);
 #ifdef MESHTASTIC_UA_LAYOUT
                     if (this->uaLayout) {
-                        const char *mapped = uaLayoutMap((char)this->payload);
+                        const char *mapped = uaUpperDigit((uint8_t)this->payload);
+                        if (!mapped)
+                            mapped = uaLayoutMap((char)this->payload);
                         if (mapped)
                             insert = mapped;
                     }
