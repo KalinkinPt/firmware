@@ -1124,8 +1124,12 @@ bool CannedMessageModule::handleFreeTextInput(const InputEvent *event)
         return handleTabSwitch(event); // Reuse tab logic
     }
 
-    // Printable ASCII (add char to draft)
-    if (event->kbchar >= 32 && event->kbchar <= 126) {
+    // Printable ASCII (add char to draft); in the UA layout also fn+6..fn+0 (upper-case ґ х ї ж є)
+    if ((event->kbchar >= 32 && event->kbchar <= 126)
+#ifdef MESHTASTIC_UA_LAYOUT
+        || (this->uaLayout && uaUpperDigit((uint8_t)event->kbchar))
+#endif
+    ) {
         payload = event->kbchar;
         lastTouchMillis = millis();
         runOnce();
